@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 
 const RAW_BASE = window.__ENV__.API_BASE
+const API_BASE = RAW_BASE.replace(/\/$/, '') 
 
 
 const items = ref([])
