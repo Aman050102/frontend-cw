@@ -1,49 +1,42 @@
-<script>
-  window.__ENV__ = {
-    // ตรวจสอบว่าไม่มี / ปิดท้าย URL
-    API_BASE: "https://backend-cw.aman02012548.workers.dev"
-  }
-</script>
-
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 
-// จัดการ API_BASE ให้สะอาด
-const RAW_BASE = window.__ENV__?.API_BASE || ''
-const API_BASE = RAW_BASE.replace(/\/$/, '')
+const API_BASE = window.__ENV__.API_BASE
 
 const items = ref([])
 const showList = ref(true)
 const loading = ref(false)
 const message = ref('')
 
+// Search
 const searchId = ref('')
 const searchResult = ref(null)
+
+// Create
 const newItem = reactive({ title: '', description: '' })
+
+// Update
 const updateId = ref('')
 const updateField = ref('title')
 const updateValue = ref('')
-const deleteId = ref('')
 
-// Helper สำหรับจัดการ Fetch เพื่อป้องกัน JSON Parse Error จาก HTML
-const safeFetch = async (url, options = {}) => {
-  const res = await fetch(url, options)
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}))
-    throw new Error(errorData.error || `Server error: ${res.status}`)
-  }
-  if (res.status === 204) return null
-  return res.json()
-}
+// Delete
+const deleteId = ref('')
 
 const fetchAll = async () => {
   loading.value = true
   message.value = ''
   try {
-    items.value = await safeFetch(`${API_BASE}/items`)
+    // กำจัด / ที่อาจเกินมาเพื่อป้องกัน URL ซ้อนกัน (//items)
+    const cleanBase = API_BASE.replace(/\/$/, '')
+    const res = await fetch(`${cleanBase}/items`)
+
+    // ตรวจสอบสถานะก่อน parse JSON เพื่อป้องกัน error "Unexpected non-whitespace"
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+    items.value = await res.json()
   } catch (e) {
     message.value = 'Fetch error: ' + e.message
-    items.value = []
   } finally {
     loading.value = false
   }
@@ -51,25 +44,35 @@ const fetchAll = async () => {
 
 const fetchById = async () => {
   if (!searchId.value) return (message.value = 'Enter id')
+  message.value = ''
   try {
-    searchResult.value = await safeFetch(`${API_BASE}/items/${encodeURIComponent(searchId.value)}`)
-    message.value = ''
+    const cleanBase = API_BASE.replace(/\/$/, '')
+    const res = await fetch(`${cleanBase}/items/${encodeURIComponent(searchId.value)}`)
+    if (res.status === 404) return (searchResult.value = null, message.value = 'Not found')
+    searchResult.value = await res.json()
   } catch (e) {
-    searchResult.value = null
-    message.value = e.message
+    message.value = 'Fetch error: ' + e.message
   }
 }
 
 const createItem = async () => {
   if (!newItem.title) return (message.value = 'Title required')
+  message.value = ''
   try {
-    await safeFetch(`${API_BASE}/items`, {
+    const cleanBase = API_BASE.replace(/\/$/, '')
+    const res = await fetch(`${cleanBase}/items`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newItem),
     })
-    message.value = 'Created successfully'
-    newItem.title = ''; newItem.description = ''
+    if (res.status >= 400) {
+      const j = await res.json().catch(() => ({}))
+      return (message.value = j.error || 'Create failed')
+    }
+    const created = await res.json()
+    message.value = 'Created id ' + (created?.id || '(unknown)')
+    newItem.title = ''
+    newItem.description = ''
     await fetchAll()
   } catch (e) {
     message.value = 'Create error: ' + e.message
@@ -77,15 +80,28 @@ const createItem = async () => {
 }
 
 const updateItem = async () => {
-  if (!updateId.value || !updateValue.value) return (message.value = 'ID and Value required')
+  if (!updateId.value) return (message.value = 'Enter id')
+  if (!updateValue.value) return (message.value = 'Enter value')
+  message.value = ''
   try {
-    const body = { [updateField.value]: updateValue.value }
-    await safeFetch(`${API_BASE}/items/${encodeURIComponent(updateId.value)}`, {
+    let body = {}
+    if (updateField.value === 'title') body = { title: updateValue.value }
+    else body = { description: updateValue.value }
+
+    const cleanBase = API_BASE.replace(/\/$/, '')
+    const res = await fetch(`${cleanBase}/items/${encodeURIComponent(updateId.value)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    message.value = `Updated ${updateId.value} successfully`
+    if (res.status === 404) return (message.value = 'Not found')
+    if (res.status >= 400) {
+      const j = await res.json().catch(() => ({}))
+      return (message.value = j.error || 'Update failed')
+    }
+    const updated = await res.json()
+    message.value = 'Updated id ' + (updated?.id || updateId.value)
+    updateId.value = ''
     updateValue.value = ''
     await fetchAll()
   } catch (e) {
@@ -95,9 +111,13 @@ const updateItem = async () => {
 
 const deleteItem = async () => {
   if (!deleteId.value) return (message.value = 'Enter id')
+  message.value = ''
   try {
-    await safeFetch(`${API_BASE}/items/${encodeURIComponent(deleteId.value)}`, { method: 'DELETE' })
-    message.value = 'Deleted successfully'
+    const cleanBase = API_BASE.replace(/\/$/, '')
+    const res = await fetch(`${cleanBase}/items/${encodeURIComponent(deleteId.value)}`, { method: 'DELETE' })
+    if (res.status === 404) return (message.value = 'Not found')
+    if (res.status >= 400) return (message.value = 'Delete failed')
+    message.value = 'Deleted id ' + deleteId.value
     deleteId.value = ''
     await fetchAll()
   } catch (e) {
@@ -105,7 +125,9 @@ const deleteItem = async () => {
   }
 }
 
-onMounted(fetchAll)
+onMounted(() => {
+  fetchAll()
+})
 </script>
 
 <template>
@@ -178,3 +200,17 @@ onMounted(fetchAll)
     <div class="status" v-if="message">{{ message }}</div>
   </div>
 </template>
+
+<style scoped>
+.container{max-width:900px;margin:20px auto;font-family:system-ui,Segoe UI,Roboto,Arial}
+.muted{color:#666;font-size:0.9rem}
+.card{border:1px solid #e2e8f0;padding:12px;border-radius:6px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px}
+input,select{padding:6px 8px;border:1px solid #cbd5e1;border-radius:4px}
+button{padding:6px 10px;border-radius:4px;border:1px solid #94a3b8;background:#f8fafc;cursor:pointer}
+.items{width:100%;border-collapse:collapse;margin-top:8px}
+.items th,.items td{border:1px solid #e2e8f0;padding:6px;text-align:left}
+.status{margin-top:10px;color:#0f172a}
+h1{margin-bottom:4px}
+h2{margin:0;font-size:1.05rem}
+</style>
